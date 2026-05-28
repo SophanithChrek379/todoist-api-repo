@@ -1,8 +1,8 @@
 import os
-from typing import Optional
+from typing import Literal, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from supabase import Client, create_client
 
@@ -45,9 +45,24 @@ TODO_COLUMNS = "id,title,is_completed,created_at,updated_at"
 
 
 @app.get("/todos")
-def list_todos():
-    response = supabase.table("todoist_data").select(TODO_COLUMNS).execute()
-    return {"todos": response.data}
+def list_todos(
+    limit: int = Query(20, ge=1, le=100),
+    sorting: Literal["asc", "desc"] = Query("desc"),
+):
+    response = (
+        supabase.table("todoist_data")
+        .select(TODO_COLUMNS, count="exact")
+        .order("created_at", desc=(sorting == "desc"))
+        .limit(limit)
+        .execute()
+    )
+
+    return {
+        "todos": response.data,
+        "total": response.count if response.count is not None else len(response.data),
+        "limit": limit,
+        "sorting": sorting,
+    }
 
 
 @app.get("/todos/{todo_id}")

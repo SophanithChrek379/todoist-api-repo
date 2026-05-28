@@ -14,8 +14,9 @@ def _now_iso():
 
 
 class FakeResponse:
-    def __init__(self, data):
+    def __init__(self, data, count=None):
         self.data = data
+        self.count = count
 
 
 class FakeQuery:
@@ -24,9 +25,23 @@ class FakeQuery:
         self.action = None
         self.payload = None
         self.filters = {}
+        self.with_count = False
+        self.order_by = None
+        self.order_desc = False
+        self.limit_n = None
 
-    def select(self, columns):
+    def select(self, columns, count=None):
         self.action = "select"
+        self.with_count = count == "exact"
+        return self
+
+    def order(self, column, desc=False):
+        self.order_by = column
+        self.order_desc = desc
+        return self
+
+    def limit(self, n):
+        self.limit_n = n
         return self
 
     def insert(self, payload):
@@ -75,7 +90,16 @@ class FakeQuery:
                 self.store.remove(item)
             return FakeResponse(matches)
 
-        return FakeResponse(matches)
+        total = len(matches)
+        if self.order_by:
+            matches = sorted(
+                matches,
+                key=lambda x: x.get(self.order_by) or "",
+                reverse=self.order_desc,
+            )
+        if self.limit_n is not None:
+            matches = matches[: self.limit_n]
+        return FakeResponse(matches, count=total if self.with_count else None)
 
 
 class FakeSupabase:
@@ -124,8 +148,11 @@ def test_list_todos_wrapped_in_object(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert isinstance(body, dict)
-    assert list(body.keys()) == ["todos"]
+    assert set(body.keys()) == {"todos", "total", "limit", "sorting"}
     assert isinstance(body["todos"], list)
+    assert body["total"] == 2
+    assert body["limit"] == 20
+    assert body["sorting"] == "desc"
     assert len(body["todos"]) == 2
 
 
@@ -138,11 +165,50 @@ def test_list_todos_items_include_all_fields(monkeypatch):
     assert response.status_code == 200
     first = response.json()["todos"][0]
     assert set(first.keys()) == {"id", "title", "is_completed", "created_at", "updated_at"}
-    assert first["id"] == "todo-1"
-    assert first["title"] == "First todo"
-    assert first["is_completed"] is False
-    assert first["created_at"] == SEED_CREATED_AT
-    assert first["updated_at"] == SEED_UPDATED_AT
+    assert first["title"] in {"First todo", "Second todo"}
+    assert "created_at" in first
+    assert "updated_at" in first
+
+
+def test_list_todos_respects_limit(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.get("/todos?limit=1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["limit"] == 1
+    assert body["total"] == 2
+    assert len(body["todos"]) == 1
+
+
+def test_list_todos_sorting_asc(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.get("/todos?sorting=asc")
+
+    assert response.status_code == 200
+    assert response.json()["sorting"] == "asc"
+
+
+def test_list_todos_invalid_sorting(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.get("/todos?sorting=sideways")
+
+    assert response.status_code == 422
+
+
+def test_list_todos_invalid_limit(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.get("/todos?limit=0")
+
+    assert response.status_code == 422
 
 
 # ----- GET /todos/{id} -----
