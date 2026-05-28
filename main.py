@@ -41,9 +41,12 @@ def read_root():
     return {"message": "Todoist API is running"}
 
 
+TODO_COLUMNS = "id,title,isCompleted,created_at,updated_at"
+
+
 @app.get("/todos")
 def list_todos():
-    response = supabase.table("todoist_data").select("id,title,isCompleted").execute()
+    response = supabase.table("todoist_data").select(TODO_COLUMNS).execute()
     return {"todos": response.data}
 
 
@@ -51,7 +54,7 @@ def list_todos():
 def get_todo(todo_id: str):
     response = (
         supabase.table("todoist_data")
-        .select("id,title,isCompleted")
+        .select(TODO_COLUMNS)
         .eq("id", todo_id)
         .execute()
     )
