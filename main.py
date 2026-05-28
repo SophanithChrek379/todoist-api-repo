@@ -44,24 +44,46 @@ def read_root():
 TODO_COLUMNS = "id,title,is_completed,created_at,updated_at"
 
 
+ALLOWED_SORT_FIELDS = {"id", "title", "is_completed", "created_at", "updated_at"}
+
+
 @app.get("/todos")
 def list_todos(
-    limit: int = Query(20, ge=1, le=100),
-    sorting: Literal["asc", "desc"] = Query("desc"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    sort_by: str = Query("created_at"),
+    order: Literal["asc", "desc"] = Query("desc"),
 ):
+    if sort_by not in ALLOWED_SORT_FIELDS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"sort_by must be one of {sorted(ALLOWED_SORT_FIELDS)}",
+        )
+
+    start = (page - 1) * limit
+    end = start + limit - 1
+
     response = (
         supabase.table("todoist_data")
         .select(TODO_COLUMNS, count="exact")
-        .order("created_at", desc=(sorting == "desc"))
-        .limit(limit)
+        .order(sort_by, desc=(order == "desc"))
+        .range(start, end)
         .execute()
     )
 
+    total = response.count if response.count is not None else len(response.data)
+    total_pages = (total + limit - 1) // limit if limit else 0
+
     return {
         "todos": response.data,
-        "total": response.count if response.count is not None else len(response.data),
-        "limit": limit,
-        "sorting": sorting,
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": total_pages,
+            "sort_by": sort_by,
+            "order": order,
+        },
     }
 
 

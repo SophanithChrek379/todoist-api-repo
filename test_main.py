@@ -29,6 +29,8 @@ class FakeQuery:
         self.order_by = None
         self.order_desc = False
         self.limit_n = None
+        self.range_start = None
+        self.range_end = None
 
     def select(self, columns, count=None):
         self.action = "select"
@@ -42,6 +44,11 @@ class FakeQuery:
 
     def limit(self, n):
         self.limit_n = n
+        return self
+
+    def range(self, start, end):
+        self.range_start = start
+        self.range_end = end
         return self
 
     def insert(self, payload):
@@ -97,7 +104,9 @@ class FakeQuery:
                 key=lambda x: x.get(self.order_by) or "",
                 reverse=self.order_desc,
             )
-        if self.limit_n is not None:
+        if self.range_start is not None and self.range_end is not None:
+            matches = matches[self.range_start : self.range_end + 1]
+        elif self.limit_n is not None:
             matches = matches[: self.limit_n]
         return FakeResponse(matches, count=total if self.with_count else None)
 
@@ -139,7 +148,7 @@ def test_read_root():
 
 # ----- GET /todos -----
 
-def test_list_todos_wrapped_in_object(monkeypatch):
+def test_list_todos_default_shape(monkeypatch):
     monkeypatch.setattr(main, "supabase", FakeSupabase())
     client = TestClient(main.app)
 
@@ -147,12 +156,23 @@ def test_list_todos_wrapped_in_object(monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    assert isinstance(body, dict)
-    assert set(body.keys()) == {"todos", "total", "limit", "sorting"}
-    assert isinstance(body["todos"], list)
-    assert body["total"] == 2
-    assert body["limit"] == 20
-    assert body["sorting"] == "desc"
+    assert set(body.keys()) == {"todos", "meta"}
+    assert set(body["meta"].keys()) == {
+        "page",
+        "limit",
+        "total",
+        "total_pages",
+        "sort_by",
+        "order",
+    }
+    assert body["meta"] == {
+        "page": 1,
+        "limit": 10,
+        "total": 2,
+        "total_pages": 1,
+        "sort_by": "created_at",
+        "order": "desc",
+    }
     assert len(body["todos"]) == 2
 
 
@@ -165,39 +185,71 @@ def test_list_todos_items_include_all_fields(monkeypatch):
     assert response.status_code == 200
     first = response.json()["todos"][0]
     assert set(first.keys()) == {"id", "title", "is_completed", "created_at", "updated_at"}
-    assert first["title"] in {"First todo", "Second todo"}
-    assert "created_at" in first
-    assert "updated_at" in first
 
 
-def test_list_todos_respects_limit(monkeypatch):
+def test_list_todos_pagination_total_pages(monkeypatch):
     monkeypatch.setattr(main, "supabase", FakeSupabase())
     client = TestClient(main.app)
 
-    response = client.get("/todos?limit=1")
+    response = client.get("/todos?page=1&limit=1")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["limit"] == 1
-    assert body["total"] == 2
+    assert body["meta"]["page"] == 1
+    assert body["meta"]["limit"] == 1
+    assert body["meta"]["total"] == 2
+    assert body["meta"]["total_pages"] == 2
     assert len(body["todos"]) == 1
 
 
-def test_list_todos_sorting_asc(monkeypatch):
+def test_list_todos_pagination_second_page(monkeypatch):
     monkeypatch.setattr(main, "supabase", FakeSupabase())
     client = TestClient(main.app)
 
-    response = client.get("/todos?sorting=asc")
+    response = client.get("/todos?page=2&limit=1")
 
     assert response.status_code == 200
-    assert response.json()["sorting"] == "asc"
+    body = response.json()
+    assert body["meta"]["page"] == 2
+    assert len(body["todos"]) == 1
 
 
-def test_list_todos_invalid_sorting(monkeypatch):
+def test_list_todos_dynamic_sort_by(monkeypatch):
     monkeypatch.setattr(main, "supabase", FakeSupabase())
     client = TestClient(main.app)
 
-    response = client.get("/todos?sorting=sideways")
+    response = client.get("/todos?sort_by=title&order=asc")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["meta"]["sort_by"] == "title"
+    assert body["meta"]["order"] == "asc"
+    assert body["todos"][0]["title"] == "First todo"
+
+
+def test_list_todos_invalid_sort_by(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.get("/todos?sort_by=password")
+
+    assert response.status_code == 422
+
+
+def test_list_todos_invalid_order(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.get("/todos?order=sideways")
+
+    assert response.status_code == 422
+
+
+def test_list_todos_invalid_page(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.get("/todos?page=0")
 
     assert response.status_code == 422
 
