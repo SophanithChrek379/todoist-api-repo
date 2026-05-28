@@ -22,18 +22,18 @@ supabase: Client = create_client(supabase_url, supabase_key)
 
 class TodoCreate(BaseModel):
     title: str
-    isCompleted: bool = False
+    is_completed: bool = False
 
 
 class TodoUpdate(BaseModel):
     title: Optional[str] = None
-    isCompleted: Optional[bool] = None
+    is_completed: Optional[bool] = None
 
 
 class TodoCompletedUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    isCompleted: bool
+    is_completed: bool
 
 
 @app.get("/")
@@ -41,7 +41,7 @@ def read_root():
     return {"message": "Todoist API is running"}
 
 
-TODO_COLUMNS = "id,title,isCompleted,created_at,updated_at"
+TODO_COLUMNS = "id,title,is_completed,created_at,updated_at"
 
 
 @app.get("/todos")
@@ -99,7 +99,7 @@ def update_todo(todo_id: str, todo: TodoUpdate):
 def update_todo_completed(todo_id: str, todo: TodoCompletedUpdate):
     response = (
         supabase.table("todoist_data")
-        .update({"isCompleted": todo.isCompleted})
+        .update({"is_completed": todo.is_completed})
         .eq("id", todo_id)
         .execute()
     )

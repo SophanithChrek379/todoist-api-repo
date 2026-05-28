@@ -84,14 +84,14 @@ class FakeSupabase:
             {
                 "id": "todo-1",
                 "title": "First todo",
-                "isCompleted": False,
+                "is_completed": False,
                 "created_at": SEED_CREATED_AT,
                 "updated_at": SEED_UPDATED_AT,
             },
             {
                 "id": "todo-2",
                 "title": "Second todo",
-                "isCompleted": True,
+                "is_completed": True,
                 "created_at": SEED_CREATED_AT,
                 "updated_at": SEED_UPDATED_AT,
             },
@@ -137,10 +137,10 @@ def test_list_todos_items_include_all_fields(monkeypatch):
 
     assert response.status_code == 200
     first = response.json()["todos"][0]
-    assert set(first.keys()) == {"id", "title", "isCompleted", "created_at", "updated_at"}
+    assert set(first.keys()) == {"id", "title", "is_completed", "created_at", "updated_at"}
     assert first["id"] == "todo-1"
     assert first["title"] == "First todo"
-    assert first["isCompleted"] is False
+    assert first["is_completed"] is False
     assert first["created_at"] == SEED_CREATED_AT
     assert first["updated_at"] == SEED_UPDATED_AT
 
@@ -157,7 +157,7 @@ def test_get_todo(monkeypatch):
     assert response.json() == {
         "id": "todo-1",
         "title": "First todo",
-        "isCompleted": False,
+        "is_completed": False,
         "created_at": SEED_CREATED_AT,
         "updated_at": SEED_UPDATED_AT,
     }
@@ -179,13 +179,13 @@ def test_create_todo(monkeypatch):
     monkeypatch.setattr(main, "supabase", FakeSupabase())
     client = TestClient(main.app)
 
-    response = client.post("/todos", json={"title": "New todo", "isCompleted": False})
+    response = client.post("/todos", json={"title": "New todo", "is_completed": False})
 
     assert response.status_code == 201
     body = response.json()
     assert body["id"] == "new-id"
     assert body["title"] == "New todo"
-    assert body["isCompleted"] is False
+    assert body["is_completed"] is False
     assert "created_at" in body
     assert "updated_at" in body
     assert body["created_at"] == body["updated_at"]
@@ -198,14 +198,14 @@ def test_create_todo_defaults_is_completed(monkeypatch):
     response = client.post("/todos", json={"title": "Only title"})
 
     assert response.status_code == 201
-    assert response.json()["isCompleted"] is False
+    assert response.json()["is_completed"] is False
 
 
 def test_create_todo_requires_title(monkeypatch):
     monkeypatch.setattr(main, "supabase", FakeSupabase())
     client = TestClient(main.app)
 
-    response = client.post("/todos", json={"isCompleted": True})
+    response = client.post("/todos", json={"is_completed": True})
 
     assert response.status_code == 422
 
@@ -218,13 +218,13 @@ def test_update_todo(monkeypatch):
 
     response = client.put(
         "/todos/todo-1",
-        json={"title": "Updated todo", "isCompleted": True},
+        json={"title": "Updated todo", "is_completed": True},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["title"] == "Updated todo"
-    assert body["isCompleted"] is True
+    assert body["is_completed"] is True
     assert body["created_at"] == SEED_CREATED_AT
     assert body["updated_at"] != SEED_UPDATED_AT
 
@@ -238,7 +238,7 @@ def test_update_todo_partial_title_only(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["title"] == "Just title"
-    assert body["isCompleted"] is False
+    assert body["is_completed"] is False
     assert body["updated_at"] != SEED_UPDATED_AT
 
 
@@ -268,11 +268,11 @@ def test_patch_todo_completed(monkeypatch):
     monkeypatch.setattr(main, "supabase", FakeSupabase())
     client = TestClient(main.app)
 
-    response = client.patch("/todos/todo-1/completed", json={"isCompleted": True})
+    response = client.patch("/todos/todo-1/completed", json={"is_completed": True})
 
     assert response.status_code == 200
     body = response.json()
-    assert body["isCompleted"] is True
+    assert body["is_completed"] is True
     assert body["created_at"] == SEED_CREATED_AT
     assert body["updated_at"] != SEED_UPDATED_AT
 
@@ -283,7 +283,7 @@ def test_patch_todo_completed_rejects_extra_fields(monkeypatch):
 
     response = client.patch(
         "/todos/todo-1/completed",
-        json={"isCompleted": True, "title": "Not allowed"},
+        json={"is_completed": True, "title": "Not allowed"},
     )
 
     assert response.status_code == 422
@@ -293,7 +293,7 @@ def test_patch_todo_completed_not_found(monkeypatch):
     monkeypatch.setattr(main, "supabase", FakeSupabase())
     client = TestClient(main.app)
 
-    response = client.patch("/todos/missing/completed", json={"isCompleted": True})
+    response = client.patch("/todos/missing/completed", json={"is_completed": True})
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Todo not found"

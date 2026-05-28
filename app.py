@@ -14,12 +14,12 @@ supabase: Client = create_client(
 
 @app.route('/')
 def index():
-    response = supabase.table('todoist_data').select("id,title,isCompleted").execute()
+    response = supabase.table('todoist_data').select("id,title,is_completed").execute()
     todos = response.data
 
     html = '<h1>Todos</h1><ul>'
     for todo in todos:
-        checked = "checked" if todo["isCompleted"] else ""
+        checked = "checked" if todo["is_completed"] else ""
         html += f'<li><input type="checkbox" {checked} disabled> {todo["title"]}</li>'
     html += '</ul>'
 
