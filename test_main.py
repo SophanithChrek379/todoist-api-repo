@@ -89,7 +89,9 @@ def test_list_todos(monkeypatch):
     response = client.get("/todos")
 
     assert response.status_code == 200
-    assert response.json()[0]["title"] == "First todo"
+    body = response.json()
+    assert "todos" in body
+    assert body["todos"][0]["title"] == "First todo"
 
 
 def test_get_todo(monkeypatch):

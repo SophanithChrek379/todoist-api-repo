@@ -44,7 +44,7 @@ def read_root():
 @app.get("/todos")
 def list_todos():
     response = supabase.table("todoist_data").select("id,title,isCompleted").execute()
-    return response.data
+    return {"todos": response.data}
 
 
 @app.get("/todos/{todo_id}")
