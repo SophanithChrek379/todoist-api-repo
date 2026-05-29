@@ -2,7 +2,8 @@ import os
 from typing import Literal, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from supabase import Client, create_client
 
@@ -109,6 +110,32 @@ def login(body: LoginRequest):
     return _auth_payload(auth_response)
 
 
+# ----- Auth dependency -----
+
+bearer_scheme = HTTPBearer(auto_error=True)
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+):
+    token = credentials.credentials
+    try:
+        result = supabase.auth.get_user(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    user = getattr(result, "user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    return {"id": user.id, "email": user.email, "token": token}
+
+
+@app.get("/auth/me")
+def me(current_user: dict = Depends(get_current_user)):
+    return {"id": current_user["id"], "email": current_user["email"]}
+
+
 TODO_COLUMNS = "id,title,is_completed,created_at,updated_at"
 
 
@@ -121,6 +148,7 @@ def list_todos(
     limit: int = Query(10, ge=1, le=100),
     sort_by: str = Query("created_at"),
     order: Literal["asc", "desc"] = Query("desc"),
+    current_user: dict = Depends(get_current_user),
 ):
     if sort_by not in ALLOWED_SORT_FIELDS:
         raise HTTPException(
@@ -134,6 +162,7 @@ def list_todos(
     response = (
         supabase.table("tbl_todos")
         .select(TODO_COLUMNS, count="exact")
+        .eq("user_id", current_user["id"])
         .order(sort_by, desc=(order == "desc"))
         .range(start, end)
         .execute()
@@ -156,11 +185,12 @@ def list_todos(
 
 
 @app.get("/todos/{todo_id}")
-def get_todo(todo_id: str):
+def get_todo(todo_id: str, current_user: dict = Depends(get_current_user)):
     response = (
         supabase.table("tbl_todos")
         .select(TODO_COLUMNS)
         .eq("id", todo_id)
+        .eq("user_id", current_user["id"])
         .execute()
     )
 
@@ -171,17 +201,22 @@ def get_todo(todo_id: str):
 
 
 @app.post("/todos", status_code=201)
-def create_todo(todo: TodoCreate):
+def create_todo(todo: TodoCreate, current_user: dict = Depends(get_current_user)):
+    payload = {**todo.model_dump(), "user_id": current_user["id"]}
     response = (
         supabase.table("tbl_todos")
-        .insert(todo.model_dump())
+        .insert(payload)
         .execute()
     )
     return response.data[0]
 
 
 @app.put("/todos/{todo_id}")
-def update_todo(todo_id: str, todo: TodoUpdate):
+def update_todo(
+    todo_id: str,
+    todo: TodoUpdate,
+    current_user: dict = Depends(get_current_user),
+):
     updates = todo.model_dump(exclude_unset=True)
 
     if not updates:
@@ -191,6 +226,7 @@ def update_todo(todo_id: str, todo: TodoUpdate):
         supabase.table("tbl_todos")
         .update(updates)
         .eq("id", todo_id)
+        .eq("user_id", current_user["id"])
         .execute()
     )
 
@@ -201,11 +237,16 @@ def update_todo(todo_id: str, todo: TodoUpdate):
 
 
 @app.patch("/todos/{todo_id}/completed")
-def update_todo_completed(todo_id: str, todo: TodoCompletedUpdate):
+def update_todo_completed(
+    todo_id: str,
+    todo: TodoCompletedUpdate,
+    current_user: dict = Depends(get_current_user),
+):
     response = (
         supabase.table("tbl_todos")
         .update({"is_completed": todo.is_completed})
         .eq("id", todo_id)
+        .eq("user_id", current_user["id"])
         .execute()
     )
 
@@ -216,11 +257,12 @@ def update_todo_completed(todo_id: str, todo: TodoCompletedUpdate):
 
 
 @app.delete("/todos/{todo_id}")
-def delete_todo(todo_id: str):
+def delete_todo(todo_id: str, current_user: dict = Depends(get_current_user)):
     response = (
         supabase.table("tbl_todos")
         .delete()
         .eq("id", todo_id)
+        .eq("user_id", current_user["id"])
         .execute()
     )
 
