@@ -14,7 +14,7 @@ supabase: Client = create_client(
 
 @app.route('/')
 def index():
-    response = supabase.table('todoist_data').select("id,title,is_completed").execute()
+    response = supabase.table('tbl_todos').select("id,title,is_completed").execute()
     todos = response.data
 
     html = '<h1>Todos</h1><ul>'

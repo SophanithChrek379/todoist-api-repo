@@ -3,7 +3,7 @@ from typing import Literal, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from supabase import Client, create_client
 
 
@@ -36,9 +36,77 @@ class TodoCompletedUpdate(BaseModel):
     is_completed: bool
 
 
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=72)
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    password: str
+
+
 @app.get("/")
 def read_root():
     return {"message": "Todoist API is running"}
+
+
+# ----- Auth -----
+
+def _auth_payload(auth_response):
+    user = auth_response.user
+    session = auth_response.session
+
+    if user is None:
+        raise HTTPException(status_code=400, detail="Authentication failed")
+
+    payload = {
+        "user": {
+            "id": user.id,
+            "email": user.email,
+        }
+    }
+
+    if session is not None:
+        payload["session"] = {
+            "access_token": session.access_token,
+            "refresh_token": session.refresh_token,
+            "token_type": session.token_type,
+            "expires_in": session.expires_in,
+        }
+
+    return payload
+
+
+@app.post("/auth/register", status_code=201)
+def register(body: RegisterRequest):
+    try:
+        auth_response = supabase.auth.sign_up(
+            {"email": body.email, "password": body.password}
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return _auth_payload(auth_response)
+
+
+@app.post("/auth/login")
+def login(body: LoginRequest):
+    try:
+        auth_response = supabase.auth.sign_in_with_password(
+            {"email": body.email, "password": body.password}
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if auth_response.session is None:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    return _auth_payload(auth_response)
 
 
 TODO_COLUMNS = "id,title,is_completed,created_at,updated_at"
@@ -64,7 +132,7 @@ def list_todos(
     end = start + limit - 1
 
     response = (
-        supabase.table("todoist_data")
+        supabase.table("tbl_todos")
         .select(TODO_COLUMNS, count="exact")
         .order(sort_by, desc=(order == "desc"))
         .range(start, end)
@@ -90,7 +158,7 @@ def list_todos(
 @app.get("/todos/{todo_id}")
 def get_todo(todo_id: str):
     response = (
-        supabase.table("todoist_data")
+        supabase.table("tbl_todos")
         .select(TODO_COLUMNS)
         .eq("id", todo_id)
         .execute()
@@ -105,7 +173,7 @@ def get_todo(todo_id: str):
 @app.post("/todos", status_code=201)
 def create_todo(todo: TodoCreate):
     response = (
-        supabase.table("todoist_data")
+        supabase.table("tbl_todos")
         .insert(todo.model_dump())
         .execute()
     )
@@ -120,7 +188,7 @@ def update_todo(todo_id: str, todo: TodoUpdate):
         raise HTTPException(status_code=400, detail="No fields to update")
 
     response = (
-        supabase.table("todoist_data")
+        supabase.table("tbl_todos")
         .update(updates)
         .eq("id", todo_id)
         .execute()
@@ -135,7 +203,7 @@ def update_todo(todo_id: str, todo: TodoUpdate):
 @app.patch("/todos/{todo_id}/completed")
 def update_todo_completed(todo_id: str, todo: TodoCompletedUpdate):
     response = (
-        supabase.table("todoist_data")
+        supabase.table("tbl_todos")
         .update({"is_completed": todo.is_completed})
         .eq("id", todo_id)
         .execute()
@@ -150,7 +218,7 @@ def update_todo_completed(todo_id: str, todo: TodoCompletedUpdate):
 @app.delete("/todos/{todo_id}")
 def delete_todo(todo_id: str):
     response = (
-        supabase.table("todoist_data")
+        supabase.table("tbl_todos")
         .delete()
         .eq("id", todo_id)
         .execute()

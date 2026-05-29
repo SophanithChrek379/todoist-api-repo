@@ -111,6 +111,52 @@ class FakeQuery:
         return FakeResponse(matches, count=total if self.with_count else None)
 
 
+class FakeUser:
+    def __init__(self, id, email):
+        self.id = id
+        self.email = email
+
+
+class FakeSession:
+    def __init__(self, access_token, refresh_token):
+        self.access_token = access_token
+        self.refresh_token = refresh_token
+        self.token_type = "bearer"
+        self.expires_in = 3600
+
+
+class FakeAuthResponse:
+    def __init__(self, user, session):
+        self.user = user
+        self.session = session
+
+
+class FakeAuth:
+    def __init__(self):
+        self.users = {}  # email -> {id, password}
+
+    def sign_up(self, credentials):
+        email = credentials["email"]
+        password = credentials["password"]
+        if email in self.users:
+            raise Exception("User already registered")
+        user_id = f"user-{len(self.users) + 1}"
+        self.users[email] = {"id": user_id, "password": password}
+        user = FakeUser(user_id, email)
+        session = FakeSession(f"access-{user_id}", f"refresh-{user_id}")
+        return FakeAuthResponse(user, session)
+
+    def sign_in_with_password(self, credentials):
+        email = credentials["email"]
+        password = credentials["password"]
+        record = self.users.get(email)
+        if not record or record["password"] != password:
+            raise Exception("Invalid login credentials")
+        user = FakeUser(record["id"], email)
+        session = FakeSession(f"access-{record['id']}", f"refresh-{record['id']}")
+        return FakeAuthResponse(user, session)
+
+
 class FakeSupabase:
     def __init__(self):
         self.store = [
@@ -129,9 +175,10 @@ class FakeSupabase:
                 "updated_at": SEED_UPDATED_AT,
             },
         ]
+        self.auth = FakeAuth()
 
     def table(self, name):
-        assert name == "todoist_data"
+        assert name == "tbl_todos"
         return FakeQuery(self.store)
 
 
@@ -442,3 +489,135 @@ def test_delete_todo_not_found(monkeypatch):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Todo not found"
+
+
+# ----- POST /auth/register -----
+
+def test_register_success(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/auth/register",
+        json={"email": "new@example.com", "password": "Strong123!"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["user"]["email"] == "new@example.com"
+    assert body["user"]["id"] == "user-1"
+    assert body["session"]["access_token"] == "access-user-1"
+    assert body["session"]["refresh_token"] == "refresh-user-1"
+    assert body["session"]["token_type"] == "bearer"
+
+
+def test_register_duplicate_email(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    client.post(
+        "/auth/register",
+        json={"email": "dup@example.com", "password": "Strong123!"},
+    )
+    response = client.post(
+        "/auth/register",
+        json={"email": "dup@example.com", "password": "Strong123!"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_register_invalid_email(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/auth/register",
+        json={"email": "not-an-email", "password": "Strong123!"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_register_short_password(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/auth/register",
+        json={"email": "a@example.com", "password": "short"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_register_rejects_extra_fields(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/auth/register",
+        json={"email": "a@example.com", "password": "Strong123!", "role": "admin"},
+    )
+
+    assert response.status_code == 422
+
+
+# ----- POST /auth/login -----
+
+def test_login_success(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    client.post(
+        "/auth/register",
+        json={"email": "me@example.com", "password": "Strong123!"},
+    )
+    response = client.post(
+        "/auth/login",
+        json={"email": "me@example.com", "password": "Strong123!"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user"]["email"] == "me@example.com"
+    assert body["session"]["access_token"].startswith("access-")
+    assert body["session"]["refresh_token"].startswith("refresh-")
+
+
+def test_login_wrong_password(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    client.post(
+        "/auth/register",
+        json={"email": "me@example.com", "password": "Strong123!"},
+    )
+    response = client.post(
+        "/auth/login",
+        json={"email": "me@example.com", "password": "WrongPass!"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid email or password"
+
+
+def test_login_unknown_user(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/auth/login",
+        json={"email": "nobody@example.com", "password": "Whatever1!"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_login_missing_password(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.post("/auth/login", json={"email": "me@example.com"})
+
+    assert response.status_code == 422

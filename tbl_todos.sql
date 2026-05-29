@@ -1,9 +1,9 @@
-create table public.todoist_data (
+create table public.tbl_todos (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   is_completed boolean not null default false
 );
-insert into public.todoist_data (title, is_completed) values
+insert into public.tbl_todos (title, is_completed) values
   ('Buy groceries', false),
   ('Review iOS app wireframes', false),
   ('Call the dentist', true),
