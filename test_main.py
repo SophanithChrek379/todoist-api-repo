@@ -156,6 +156,10 @@ class FakeAuth:
             f"access-{SEED_USER_ID}": SEED_USER_ID,
             f"access-{OTHER_USER_ID}": OTHER_USER_ID,
         }
+        self._refresh_to_user = {
+            f"refresh-{SEED_USER_ID}": SEED_USER_ID,
+            f"refresh-{OTHER_USER_ID}": OTHER_USER_ID,
+        }
 
     def sign_up(self, credentials):
         email = credentials["email"]
@@ -177,6 +181,17 @@ class FakeAuth:
             raise Exception("Invalid login credentials")
         user = FakeUser(record["id"], email)
         session = FakeSession(f"access-{record['id']}", f"refresh-{record['id']}")
+        return FakeAuthResponse(user, session)
+
+    def refresh_session(self, refresh_token):
+        user_id = self._refresh_to_user.get(refresh_token)
+        if not user_id:
+            raise Exception("Invalid refresh token")
+        email = next(e for e, r in self.users.items() if r["id"] == user_id)
+        user = FakeUser(user_id, email)
+        session = FakeSession(f"access-{user_id}-new", f"refresh-{user_id}-new")
+        self._token_to_user[session.access_token] = user_id
+        self._refresh_to_user[session.refresh_token] = user_id
         return FakeAuthResponse(user, session)
 
     def get_user(self, token):
@@ -722,6 +737,75 @@ def test_login_missing_password(monkeypatch):
     response = client.post("/auth/login", json={"email": "owner@example.com"})
 
     assert response.status_code == 422
+
+
+# ----- POST /auth/refresh -----
+
+def test_refresh_success(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/auth/refresh",
+        json={"refresh_token": f"refresh-{SEED_USER_ID}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body.keys()) == {"access_token", "refresh_token"}
+    assert body["access_token"] == f"access-{SEED_USER_ID}-new"
+    assert body["refresh_token"] == f"refresh-{SEED_USER_ID}-new"
+
+
+def test_refresh_invalid_token(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/auth/refresh",
+        json={"refresh_token": "not-a-real-refresh-token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_refresh_missing_field(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.post("/auth/refresh", json={})
+
+    assert response.status_code == 422
+
+
+def test_refresh_rejects_extra_fields(monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/auth/refresh",
+        json={"refresh_token": f"refresh-{SEED_USER_ID}", "scope": "admin"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_refresh_rotates_token(monkeypatch):
+    """A used refresh token returns a new pair; reusing the old one still works
+    in our fake (Supabase rotates server-side), but the new token must be usable."""
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    client = TestClient(main.app)
+
+    first = client.post(
+        "/auth/refresh",
+        json={"refresh_token": f"refresh-{SEED_USER_ID}"},
+    )
+    assert first.status_code == 200
+    new_access = first.json()["access_token"]
+
+    me = client.get("/auth/me", headers={"Authorization": f"Bearer {new_access}"})
+    assert me.status_code == 200
+    assert me.json()["id"] == SEED_USER_ID
 
 
 # ----- GET /auth/me -----

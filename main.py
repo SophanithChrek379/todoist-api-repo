@@ -51,6 +51,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: str
+
+
 @app.get("/")
 def read_root():
     return {"message": "Todoist API is running"}
@@ -108,6 +114,23 @@ def login(body: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     return _auth_payload(auth_response)
+
+
+@app.post("/auth/refresh")
+def refresh(body: RefreshRequest):
+    try:
+        auth_response = supabase.auth.refresh_session(body.refresh_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+    session = getattr(auth_response, "session", None)
+    if session is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+    return {
+        "access_token": session.access_token,
+        "refresh_token": session.refresh_token,
+    }
 
 
 # ----- Auth dependency -----
